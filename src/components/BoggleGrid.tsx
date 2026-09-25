@@ -7,7 +7,7 @@ interface BoggleGridProps {
 
 export function BoggleGrid({ letters, isHidden }: BoggleGridProps) {
   return (
-    <div className="grid grid-cols-4 gap-2 p-2 bg-white rounded-lg shadow-lg max-w-md w-full aspect-square">
+    <div className="grid grid-cols-4 gap-2 p-2 bg-white rounded-lg shadow-lg max-w-md w-full mx-auto aspect-square">
       {letters.map((letter, index) => (
         <div
           key={index}

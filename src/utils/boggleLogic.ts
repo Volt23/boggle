@@ -19,6 +19,19 @@ export const DICE = [
 ];
 
 export function generateGrid(): string[] {
-  const shuffledDice = [...DICE].sort(() => Math.random() - 0.5);
+  // Fisher–Yates: sorting with a random comparator gives a biased shuffle.
+  const shuffledDice = [...DICE];
+  for (let i = shuffledDice.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledDice[i], shuffledDice[j]] = [shuffledDice[j], shuffledDice[i]];
+  }
   return shuffledDice.map(die => die[Math.floor(Math.random() * die.length)]);
+}
+
+export function isValidGrid(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length === DICE.length &&
+    value.every(letter => typeof letter === 'string' && letter.length <= 2)
+  );
 }
