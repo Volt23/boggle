@@ -1,10 +1,10 @@
 # Boggle
 
-A Boggle timer and board for playing with pen and paper, synced live between everyone who has the page open.
+A Boggle timer and board for playing with pen and paper. No accounts, no server: everything runs in the browser.
 
-- **Shuffle & start** rolls the 16 classic dice and starts the clock for every connected player; pause/resume is shared too (Space toggles it).
+- **Shuffle & start** rolls the 16 classic dice and starts the clock. Space pauses and resumes; the board blurs while paused.
+- **Play together**: every board has a 5-character code (shown top right, and in the page link). Everyone who enters the same code, or opens the same link, gets the same board. Count down and press start together.
 - When time is up the board hides; show it again, check the words from your list, and browse every word on the board with its score (official scoring, 3+ letters, "Qu" counts as two). Tap a word to trace it on the board.
-- Works offline on a single device when the realtime server is unreachable.
 
 ## Development
 
@@ -13,9 +13,9 @@ npm install
 npm run dev        # start the app
 npm test           # unit tests
 npm run lint
-npm run build      # typecheck + production build
+npm run build      # typecheck + production build (static files in dist/)
 ```
 
-Realtime sync uses Supabase (broadcast + presence on the `boggle_board` channel; the last board is saved to the `boggle_board` table, row `id = 1`). Override the project with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, or set both to empty strings to disable sync.
+The build is a static site: host `dist/` anywhere.
 
 The word list (`public/dictionary.txt`) is built from [SCOWL](http://wordlist.aspell.net/) (size 60, English/American/British) by `npm run build:dictionary`; see `public/dictionary-LICENSE.txt`.

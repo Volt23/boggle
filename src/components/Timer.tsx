@@ -17,7 +17,7 @@ export function Timer({ remainingMs, durationMs, status, onPause, onResume }: Ti
   const seconds = totalSeconds % 60;
   const progress = durationMs > 0 ? Math.min(1, remainingMs / durationMs) : 0;
   const low = status === 'running' && totalSeconds <= LOW_TIME_S;
-  const canToggle = status === 'running' || status === 'paused';
+  const canToggle = status === 'running' || status === 'paused' || status === 'ready';
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -36,8 +36,8 @@ export function Timer({ remainingMs, durationMs, status, onPause, onResume }: Ti
             type="button"
             onClick={status === 'running' ? onPause : onResume}
             className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 active:scale-95"
-            aria-label={status === 'running' ? 'Pause timer' : 'Resume timer'}
-            title={status === 'running' ? 'Pause (Space)' : 'Resume (Space)'}
+            aria-label={status === 'running' ? 'Pause timer' : status === 'ready' ? 'Start round' : 'Resume timer'}
+            title={status === 'running' ? 'Pause (Space)' : status === 'ready' ? 'Start (Space)' : 'Resume (Space)'}
           >
             {status === 'running' ? <Pause size={22} /> : <Play size={22} className="translate-x-0.5" />}
           </button>

@@ -1,140 +1,92 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
-import { generateGrid, isValidGrid } from '../utils/boggleLogic';
+import { useCallback, useEffect, useReducer, useState } from 'react';
+import { boardForCode, normalizeCode, randomCode } from '../utils/boardCode';
 import { playTimerEndSound, unlockAudio } from '../utils/sound';
-import { gameReducer, initialState, parseSnapshot, remainingAt, toSnapshot, type Snapshot } from './state';
+import { gameReducer, initialState, remainingAt } from './state';
 
-const CHANNEL = 'boggle_board';
 const TICK_MS = 200;
 
-export type Connection = 'connecting' | 'live' | 'offline';
+function codeFromHash(): string | null {
+  return normalizeCode(decodeURIComponent(window.location.hash.slice(1)));
+}
 
-const randomId = () => crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
-const clientId = randomId();
+/** Puts the code in the URL so the page link shares the board. */
+function setHash(code: string) {
+  if (codeFromHash() !== code) window.location.replace(`#${code}`);
+}
 
 export function useBoggleGame(durationMs: number) {
-  const [state, dispatch] = useReducer(gameReducer, initialState);
-  const [connection, setConnection] = useState<Connection>(supabase ? 'connecting' : 'offline');
-  const [players, setPlayers] = useState(1);
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const [state, dispatch] = useReducer(gameReducer, initialState, (init) => {
+    const code = codeFromHash();
+    return code ? gameReducer(init, { type: 'load', code, letters: boardForCode(code) }) : init;
+  });
 
   // Countdown: derived from a deadline, so it never drifts and survives background tabs
-  const [tickMs, setTickMs] = useState(state.remainingMs);
+  const [tick, setTick] = useState({ state, ms: 0 });
   useEffect(() => {
     if (state.status !== 'running') return;
     let done = false;
-    const tick = () => {
+    const update = () => {
       if (done) return;
       const left = remainingAt(state, performance.now());
       // Only re-render when the displayed second changes
-      setTickMs((prev) => (Math.ceil(prev / 1000) === Math.ceil(left / 1000) ? prev : left));
+      setTick((prev) =>
+        prev.state === state && Math.ceil(prev.ms / 1000) === Math.ceil(left / 1000) ? prev : { state, ms: left },
+      );
       if (left <= 0) {
         done = true;
         playTimerEndSound();
         dispatch({ type: 'finish' });
       }
     };
-    tick();
-    const interval = window.setInterval(tick, TICK_MS);
+    update();
+    const interval = window.setInterval(update, TICK_MS);
     return () => {
       done = true;
       window.clearInterval(interval);
     };
   }, [state]);
-  const remainingMs = state.status === 'running' ? tickMs : state.remainingMs;
 
-  // Realtime sync with the other players
+  const remainingMs =
+    state.status === 'running'
+      ? tick.state === state
+        ? tick.ms
+        : remainingAt(state, performance.now()) // first render of a new run, before the first tick
+      : state.status === 'idle' || state.status === 'ready'
+        ? durationMs
+        : state.remainingMs;
+
+  /** Deals the board for `code`, covered until the round starts. */
+  const load = useCallback((code: string) => {
+    dispatch({ type: 'load', code, letters: boardForCode(code) });
+    setHash(code);
+  }, []);
+
+  // A board link pasted into this tab (our own hash updates carry the current code and are ignored)
   useEffect(() => {
-    if (!supabase) return;
-    const client = supabase;
-    let active = true;
-
-    const channel = client.channel(CHANNEL, {
-      config: { broadcast: { self: false }, presence: { key: clientId } },
-    });
-    channelRef.current = channel;
-
-    channel
-      .on('broadcast', { event: 'state' }, ({ payload }) => {
-        const snapshot = parseSnapshot(payload);
-        if (snapshot) dispatch({ type: 'apply', snapshot, now: performance.now(), remote: true });
-      })
-      .on('broadcast', { event: 'request_state' }, () => {
-        const current = stateRef.current;
-        if (current.status !== 'idle') {
-          channel.send({ type: 'broadcast', event: 'state', payload: toSnapshot(current, performance.now()) });
-        }
-      })
-      .on('presence', { event: 'sync' }, () => {
-        setPlayers(Math.max(1, Object.keys(channel.presenceState()).length));
-      })
-      .subscribe((status) => {
-        if (!active) return;
-        if (status === 'SUBSCRIBED') {
-          setConnection('live');
-          channel.track({ online_at: Date.now() });
-          channel.send({ type: 'broadcast', event: 'request_state', payload: {} });
-        } else {
-          setConnection('offline'); // the client keeps retrying in the background
-        }
-      });
-
-    // The last board, for when nobody else is online to share theirs
-    client
-      .from('boggle_board')
-      .select('letters')
-      .eq('id', 1)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) console.warn('Could not load the saved board:', error.message);
-        else if (active && isValidGrid(data?.letters)) dispatch({ type: 'restore', letters: data.letters });
-      });
-
-    return () => {
-      active = false;
-      channelRef.current = null;
-      client.removeChannel(channel);
+    const onHashChange = () => {
+      const code = codeFromHash();
+      if (code) dispatch({ type: 'load', code, letters: boardForCode(code), onlyIfNew: true });
     };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  const publish = useCallback((snapshot: Snapshot) => {
-    dispatch({ type: 'apply', snapshot, now: performance.now() });
-    channelRef.current?.send({ type: 'broadcast', event: 'state', payload: snapshot });
-  }, []);
+  const start = useCallback(() => {
+    unlockAudio();
+    dispatch({ type: 'start', durationMs, now: performance.now() });
+  }, [durationMs]);
 
   const newRound = useCallback(() => {
-    unlockAudio();
-    const letters = generateGrid();
-    publish({
-      roundId: randomId(),
-      seq: stateRef.current.seq + 1,
-      letters,
-      status: 'running',
-      durationMs,
-      remainingMs: durationMs,
-    });
-    supabase
-      ?.from('boggle_board')
-      .update({ letters })
-      .eq('id', 1)
-      .then(({ error }) => error && console.warn('Could not save the board:', error.message));
-  }, [durationMs, publish]);
+    load(randomCode());
+    start();
+  }, [load, start]);
 
-  const pause = useCallback(() => {
-    const current = stateRef.current;
-    if (current.status !== 'running') return;
-    publish({ ...toSnapshot(current, performance.now()), status: 'paused' });
-  }, [publish]);
+  const pause = useCallback(() => dispatch({ type: 'pause', now: performance.now() }), []);
 
   const resume = useCallback(() => {
     unlockAudio();
-    const current = stateRef.current;
-    if (current.status !== 'paused') return;
-    publish({ ...toSnapshot(current, performance.now()), status: 'running' });
-  }, [publish]);
+    dispatch({ type: 'resume', now: performance.now() });
+  }, []);
 
-  return { state, remainingMs, connection, players, newRound, pause, resume };
+  return { state, remainingMs, load, start, newRound, pause, resume };
 }

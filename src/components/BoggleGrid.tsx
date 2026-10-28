@@ -1,19 +1,19 @@
 import { memo } from 'react';
-import { Pause, Sparkles } from 'lucide-react';
+import { Hourglass, Pause, Sparkles } from 'lucide-react';
 import { GRID_SIZE } from '../utils/boggleLogic';
 
-export type BoardMode = 'idle' | 'visible' | 'paused' | 'hidden';
+export type BoardMode = 'idle' | 'ready' | 'visible' | 'paused' | 'hidden';
 
 interface BoggleGridProps {
   letters: string[];
   mode: BoardMode;
-  /** Re-runs the roll animation when it changes. */
-  roundId: string;
+  /** Board code; a new code re-runs the roll animation. */
+  code: string;
   /** Cells to highlight, in order. */
   path?: number[] | null;
 }
 
-export const BoggleGrid = memo(function BoggleGrid({ letters, mode, roundId, path }: BoggleGridProps) {
+export const BoggleGrid = memo(function BoggleGrid({ letters, mode, code, path }: BoggleGridProps) {
   const showLetters = mode === 'visible' || mode === 'paused';
   const order = new Map(path?.map((cell, i) => [cell, i]));
 
@@ -29,7 +29,7 @@ export const BoggleGrid = memo(function BoggleGrid({ letters, mode, roundId, pat
           const highlighted = step !== undefined && mode === 'visible';
           return (
             <div
-              key={`${roundId}-${i}`}
+              key={`${code}-${showLetters}-${i}`} // roll in whenever the letters appear
               role="gridcell"
               style={{ animationDelay: `${i * 25}ms` }}
               className={`relative flex aspect-square select-none items-center justify-center rounded-2xl font-display font-semibold leading-none transition-[background-color,color,box-shadow,transform] duration-200 motion-safe:animate-roll ${
@@ -85,12 +85,16 @@ export const BoggleGrid = memo(function BoggleGrid({ letters, mode, roundId, pat
         )}
       </div>
 
-      {(mode === 'idle' || mode === 'paused') && (
+      {(mode === 'idle' || mode === 'ready' || mode === 'paused') && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="flex items-center gap-2 rounded-full bg-slate-950/80 px-5 py-2.5 text-sm font-medium text-white shadow-lg ring-1 ring-white/10 backdrop-blur">
             {mode === 'paused' ? (
               <>
                 <Pause size={16} /> Paused
+              </>
+            ) : mode === 'ready' ? (
+              <>
+                <Hourglass size={16} className="text-amber-300" /> Board {code} is dealt. Start when ready
               </>
             ) : (
               <>

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dices, Eye, EyeOff, Loader2, RotateCcw, Users, WifiOff } from 'lucide-react';
+import { Dices, Eye, EyeOff, Loader2, Play, RotateCcw } from 'lucide-react';
 import { BoggleGrid, type BoardMode } from './components/BoggleGrid';
+import { PlayTogether } from './components/PlayTogether';
 import { SolutionsList } from './components/SolutionsList';
 import { Timer } from './components/Timer';
 import { WordChecker } from './components/WordChecker';
 import { useDictionary, useSolutions, useStoredNumber, useWakeLock } from './game/hooks';
 import { DURATIONS_MIN } from './game/state';
-import { useBoggleGame, type Connection } from './game/useBoggleGame';
+import { useBoggleGame } from './game/useBoggleGame';
 
 const CONFIRM_WINDOW_MS = 3000;
 
 interface View {
-  roundId: string;
+  code: string;
   /** Board shown after the round ended. */
   revealed: boolean;
   /** Solution highlighted on the board. */
@@ -20,21 +21,21 @@ interface View {
   checked: number[] | null;
 }
 
-const freshView = (roundId: string): View => ({ roundId, revealed: false, selected: null, checked: null });
+const freshView = (code: string): View => ({ code, revealed: false, selected: null, checked: null });
 
 function App() {
   const [durationMin, setDurationMin] = useStoredNumber('boggle.durationMin', 3, (n) => DURATIONS_MIN.includes(n));
-  const { state, remainingMs, connection, players, newRound, pause, resume } = useBoggleGame(durationMin * 60_000);
-  const { status, letters, roundId } = state;
+  const { state, remainingMs, load, start, newRound, pause, resume } = useBoggleGame(durationMin * 60_000);
+  const { status, letters, code } = state;
   const { dictionary, error: dictionaryError, retry: retryDictionary } = useDictionary();
   const solutions = useSolutions(letters, status === 'finished', dictionary);
 
-  // Per-round view state, reset whenever a new round starts
-  const [view, setView] = useState(() => freshView(roundId));
-  const current = view.roundId === roundId ? view : freshView(roundId);
+  // Per-board view state, reset whenever the board changes
+  const [view, setView] = useState(() => freshView(code));
+  const current = view.code === code ? view : freshView(code);
   const updateView = useCallback(
-    (patch: Partial<View>) => setView((v) => ({ ...(v.roundId === roundId ? v : freshView(roundId)), ...patch })),
-    [roundId],
+    (patch: Partial<View>) => setView((v) => ({ ...(v.code === code ? v : freshView(code)), ...patch })),
+    [code],
   );
   const selectWord = useCallback((selected: string | null) => updateView({ selected, checked: null }), [updateView]);
   const showChecked = useCallback((checked: number[] | null) => updateView({ checked, selected: null }), [updateView]);
@@ -45,8 +46,8 @@ function App() {
   );
 
   const boardMode: BoardMode =
-    status === 'idle'
-      ? 'idle'
+    status === 'idle' || status === 'ready'
+      ? status
       : status === 'paused'
         ? 'paused'
         : status === 'finished' && !current.revealed && !selectedPath
@@ -55,7 +56,7 @@ function App() {
 
   useWakeLock(status === 'running');
 
-  // Starting over mid-round affects everyone, so it takes a second tap
+  // Starting over mid-round throws the round away, so it takes a second tap
   const [confirming, setConfirming] = useState(false);
   const confirmTimer = useRef<number>();
   const handleNewRound = () => {
@@ -66,7 +67,8 @@ function App() {
     }
     window.clearTimeout(confirmTimer.current);
     setConfirming(false);
-    newRound();
+    if (status === 'ready') start();
+    else newRound();
   };
   useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
 
@@ -80,6 +82,7 @@ function App() {
       if (e.repeat) return;
       if (status === 'running') pause();
       else if (status === 'paused') resume();
+      else if (status === 'ready') start();
     };
     // Buttons activate on Space keyup, so swallow that too
     const onKeyUp = (e: KeyboardEvent) => isSpace(e) && e.preventDefault();
@@ -89,7 +92,7 @@ function App() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [status, pause, resume]);
+  }, [status, pause, resume, start]);
 
   const totalScore = useMemo(() => solutions?.reduce((sum, s) => sum + s.score, 0) ?? 0, [solutions]);
 
@@ -103,18 +106,22 @@ function App() {
             </span>
             Boggle
           </h1>
-          <ConnectionBadge connection={connection} players={players} />
+          {code && (
+            <span className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/60 ring-1 ring-white/10">
+              Board <span className="font-mono text-sm font-semibold tracking-widest text-white">{code}</span>
+            </span>
+          )}
         </header>
 
         <Timer
           remainingMs={remainingMs}
-          durationMs={state.durationMs}
+          durationMs={status === 'idle' || status === 'ready' ? durationMin * 60_000 : state.durationMs}
           status={status}
           onPause={pause}
-          onResume={resume}
+          onResume={status === 'ready' ? start : resume}
         />
 
-        <BoggleGrid letters={letters} mode={boardMode} roundId={roundId} path={boardMode === 'visible' ? selectedPath : null} />
+        <BoggleGrid letters={letters} mode={boardMode} code={code} path={boardMode === 'visible' ? selectedPath : null} />
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <button
@@ -126,8 +133,14 @@ function App() {
                 : 'bg-amber-300 text-slate-900 shadow-amber-300/20 hover:bg-amber-200'
             }`}
           >
-            {confirming ? <RotateCcw size={20} /> : <Dices size={20} />}
-            {confirming ? 'Tap again to reshuffle for everyone' : status === 'idle' ? 'Shuffle & start' : 'New round'}
+            {confirming ? <RotateCcw size={20} /> : status === 'ready' ? <Play size={20} /> : <Dices size={20} />}
+            {confirming
+              ? 'Tap again to start over'
+              : status === 'idle'
+                ? 'Shuffle & start'
+                : status === 'ready'
+                  ? 'Start round'
+                  : 'New round'}
           </button>
 
           <div className="flex items-center justify-center gap-1 rounded-2xl bg-white/5 p-1 ring-1 ring-white/10" role="radiogroup" aria-label="Round length">
@@ -182,7 +195,7 @@ function App() {
             ) : dictionary && solutions ? (
               <>
                 <WordChecker
-                  key={roundId}
+                  key={code}
                   letters={letters}
                   dictionary={dictionary}
                   onHighlight={showChecked}
@@ -201,36 +214,14 @@ function App() {
           </section>
         )}
 
+        {status !== 'running' && status !== 'paused' && <PlayTogether code={code} onJoin={load} />}
+
         <p className="text-center text-sm text-white/40">
           Write your words on paper, then compare when the timer ends.
           <span className="hidden sm:inline"> Press Space to pause.</span>
         </p>
       </div>
     </div>
-  );
-}
-
-function ConnectionBadge({ connection, players }: { connection: Connection; players: number }) {
-  if (connection === 'live') {
-    return (
-      <span className="flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-400/20">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-        </span>
-        <Users size={14} />
-        {players} {players === 1 ? 'player' : 'players'}
-      </span>
-    );
-  }
-  return (
-    <span
-      className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50 ring-1 ring-white/10"
-      title={connection === 'offline' ? 'Not synced with other players; the game still works on this device' : undefined}
-    >
-      {connection === 'connecting' ? <Loader2 size={14} className="animate-spin" /> : <WifiOff size={14} />}
-      {connection === 'connecting' ? 'Connecting…' : 'Offline'}
-    </span>
   );
 }
 
